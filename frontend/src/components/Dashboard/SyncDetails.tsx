@@ -270,6 +270,10 @@ export const SyncDetails: React.FC<SyncDetailsProps> = ({
         setMessages((prev) => [...prev, errorMsg]);
       } else if (data.event === 'new_message') {
         setMessages((prev) => [...prev, data.message]);
+      } else if (data.event === 'signal') {
+        //TODO
+        console.log("SIGNAL HAS FOUND");
+        setMessages((prev) => [...prev, data.message]);
       } else if (data.event === 'subscription_update') {
         if (data.subscribed) {
           // Add subscription confirmation message
@@ -633,18 +637,18 @@ export const SyncDetails: React.FC<SyncDetailsProps> = ({
 
               {(currentSync.state === 'STOPPED' ||
                 currentSync.state === 'ERROR') && (
-                <Tooltip title={t('sync.tooltip.play')}>
-                  <IconButton
-                    size='small'
-                    onClick={() => updateSyncState('ACTIVE')}
-                    disabled={isLoading}
-                    color='inherit'
-                    sx={{ color: 'white' }}
-                  >
-                    <PlayArrowIcon />
-                  </IconButton>
-                </Tooltip>
-              )}
+                  <Tooltip title={t('sync.tooltip.play')}>
+                    <IconButton
+                      size='small'
+                      onClick={() => updateSyncState('ACTIVE')}
+                      disabled={isLoading}
+                      color='inherit'
+                      sx={{ color: 'white' }}
+                    >
+                      <PlayArrowIcon />
+                    </IconButton>
+                  </Tooltip>
+                )}
 
               {/* Settings button */}
               <Tooltip title={t('sync.tooltip.settings')}>
@@ -708,9 +712,8 @@ export const SyncDetails: React.FC<SyncDetailsProps> = ({
                 fontWeight='bold'
                 color='rgba(255, 255, 255, 0.8)'
               >
-                {`📱 ${currentSync.discussion_name} - ${
-                  isConnected ? 'Connected' : 'Disconnected'
-                }`}
+                {`📱 ${currentSync.discussion_name} - ${isConnected ? 'Connected' : 'Disconnected'
+                  }`}
               </Typography>
 
               <Box
@@ -777,10 +780,8 @@ export const SyncDetails: React.FC<SyncDetailsProps> = ({
               ) : (
                 messages.map((message) => (
                   <Box key={`${message.id}-${message.date}`} sx={{ mb: 1.5 }}>
-                    {/* Message timestamp and sender */}
-                    <Box
-                      sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}
-                    >
+                    {/* Timestamp + Sender */}
+                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
                       <Typography
                         variant='caption'
                         component='span'
@@ -808,12 +809,13 @@ export const SyncDetails: React.FC<SyncDetailsProps> = ({
                         {getSenderName(message)}:
                       </Typography>
                     </Box>
-
-                    {/* Message content */}
                     <Typography
-                      variant='body2'
+                      variant="body2"
                       sx={{
-                        color: 'white',
+                        color:
+                          message.sender.username === 'Signal'
+                            ? '#FFFF3C'  
+                            : 'white',    
                         fontFamily: 'monospace',
                         whiteSpace: 'pre-wrap',
                         wordBreak: 'break-word',
@@ -821,11 +823,23 @@ export const SyncDetails: React.FC<SyncDetailsProps> = ({
                       }}
                     >
                       {message.text}
+
                       {message.has_media && (
-                        <span style={{ color: '#FFA726' }}>
+                        <Typography
+                          component="span"
+                          variant="body2"
+                          sx={{
+                            color:
+                              message.sender.username === 'Signal'
+                                ? '#FFFF3C'   
+                                : '#FFA726',  
+                            fontFamily: 'monospace',
+                            pl: 2,
+                          }}
+                        >
                           {' '}
                           [media attachment]
-                        </span>
+                        </Typography>
                       )}
                     </Typography>
                   </Box>

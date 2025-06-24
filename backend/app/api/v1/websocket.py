@@ -14,6 +14,8 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query, H
 from telethon.tl.types import Message
 from pydantic import BaseModel
 
+from app.mt5 import MetaTraderService
+
 from app.services import TelegramService, TelegramListenerService
 from app.api.v1.telegram import get_telegram_service, active_sessions
 from app.schemas.telegram import TelegramCredentials
@@ -38,6 +40,8 @@ class ConnectionManager:
         self.listener_service: Optional[TelegramListenerService] = None
         # Store client credentials
         self.client_credentials: Dict[str, TelegramCredentials] = {}
+
+        self.mt5 = MetaTraderService()
     
     async def connect(self, websocket: WebSocket, client_id: str) -> None:
         """Register new WebSocket connection."""
@@ -171,7 +175,7 @@ class ConnectionManager:
         # Clean up disconnected clients
         for client_id in disconnect_list:
             self.disconnect(client_id)
-    
+
     async def message_handler(self, message: Message) -> None:
         """Process new Telegram messages and broadcast to subscribers."""
         if not hasattr(message, 'chat_id'):
@@ -198,9 +202,28 @@ class ConnectionManager:
                 "has_media": bool(message.media)
             }
         }
-        
+        #TODO:
+        self.mt5.test_connection()
+        parsed = self.mt5.parse_message(message.text)
+        if parsed["is_signal"] is True:
+            message_data = {
+            "event": "signal",
+            "dialog_id": dialog_id,
+            "message": {
+                "id": message.id,
+                "text": message.text,
+                "date": message.date.isoformat(),
+                "sender": {
+                    "id": sender.id if sender else None,
+                    "first_name": getattr(sender, "first_name", None),
+                    "last_name": getattr(sender, "last_name", None),
+                    "username": "Signal"
+                },
+                "has_media": bool(message.media)}}
+            await self.broadcast_to_dialog_subscribers(dialog_id, message_data)
+        else:
         # Send to all subscribers
-        await self.broadcast_to_dialog_subscribers(dialog_id, message_data)
+            await self.broadcast_to_dialog_subscribers(dialog_id, message_data)
 
     # Add a method to create and initialize a listener service with credentials
     async def initialize_listener_service(self, client_id: str, credentials: TelegramCredentials) -> Dict[str, Any]:
