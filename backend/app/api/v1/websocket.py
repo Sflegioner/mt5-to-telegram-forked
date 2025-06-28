@@ -210,6 +210,7 @@ class ConnectionManager:
         self.mt5.test_connection()
         parsed = self.mt5.parse_message(message.text,self._current_lots)
         if parsed["is_signal"] is True:
+            resylt = self.mt5.execute_BUY_operation(parsed)
             message_data = {
             "event": "signal",
             "dialog_id": dialog_id,

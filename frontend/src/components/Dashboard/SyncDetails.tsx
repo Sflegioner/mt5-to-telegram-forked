@@ -864,11 +864,11 @@ export const SyncDetails: React.FC<SyncDetailsProps> = ({
                 <div ref={messagesEndRef} />
               </Box>
             </Paper>
-            {websocketRef.current ? (
+            {/* {websocketRef.current ? (
               <AdminPanalComponent ws={websocketRef.current} />
             ) : (
               <>No connection</>
-            )}
+            )} */}
           </Container>
           {/* Terminal-like Live Messages Display */}
 

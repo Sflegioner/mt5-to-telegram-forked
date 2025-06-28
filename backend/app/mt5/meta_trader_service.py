@@ -34,118 +34,109 @@ class MetaTraderService:
     def parse_message(self, message_text: str, LOTs_from_signals: float) -> dict:
         """
         Expected formats:
-        - "EURUSD 1.2345/1.2350 0.1"
-        - "#signal: GBPUSD | 1.4000 - 1.4020 | LOT=0.2"
+         BUY:
+        „  LIVE TREND
+        ICH KAUFE AMAZON CALL 225 (EK: 10.40)
+        Ich wähle den maximalen Multiplikator ℹℹ“
+        „  LIVE TREND
+        ICH KAUFE TESLA PUT 380 (EK: 31.50)
+        Ich wähle den maximalen Multiplikator “
+        „  LIVE TREND
+        ICH KAUFE GOLD (EK: 2607.48)
+        Ich wähle den maximalen Multiplikator“
+        SET:
+        „I
+        ch setze den 
+        SL bei TESLA PUT 380 auf 28.35“
+        Or just:
+        „TESLA PUT 380 
+        SL: 181.1453“
+        CLOSE:
+        „ICH SCHLIEßE AMAZON CALL ℹℹ 225 721€ GEWINN “
+        „ICH SCHLIEßE GOLDℹℹ2.070€ GEWINN “
+        SELL:
+        „  LIVE TREND
+        ICH VERKAUFE TESLA PUT 380 (EK: 34.75)
+        Ich wähle den maximalen Multiplikator“
         """
-        DEFAULT_LOTS = 0.1  
-
         result = {
-            "message": message_text,
-            "parsed_message": None,
+            "is_signal":False,
+            "type": None,
             "symbol": None,
-            "bid": None,
-            "ask": None,
-            "lots": LOTs_from_signals if LOTs_from_signals else DEFAULT_LOTS,
-            "is_signal": False,
+            "option": None,
+            "strike": None,
+            "price": None,
+            "LOTs": 0.01
         }
-
-        pattern = re.compile(
-            r"(?P<symbol>[A-Za-z]{6})[^0-9]+"
-            r"(?P<bid>\d+\.?\d*)\s*[/-]\s*(?P<ask>\d+\.?\d*)"
-            r"(?:[^0-9]+(?P<lots>\d+\.?\d*))?"
-        )
-        match = pattern.search(message_text)
-        if match:
-            symbol = match.group("symbol").upper()
-            bid = float(match.group("bid"))
-            ask = float(match.group("ask"))
-            lots_raw = match.group("lots")
-            
-            if lots_raw:
-                lots = float(lots_raw)
-            elif LOTs_from_signals:
-                lots = LOTs_from_signals
-            else:
-                lots = DEFAULT_LOTS
-
-            result.update({
-                "symbol": symbol,
-                "bid": bid,
-                "ask": ask,
-                "lots": lots,
-                "is_signal": True,
-            })
-
+        match_buy=re.search(r'KAUFE\s+(?P<symbol>\w+)(?:\s+(?P<option>CALL|PUT)\s+(?P<strike>\d+))?.*EK:\s*(?P<price>[\d\.]+)', message_text, re.IGNORECASE)
+        #logger.warning(mt5.symbol_info("AMZN")._asdict())
+        if match_buy:
+            result['type'] = 'BUY'
+            result['symbol'] = match_buy.group('symbol').upper() # Name of actions to buy
+            result['option'] = match_buy.group('option')  # CALL - increasing asset price  or PUT - falling asset price
+            result['strike'] = match_buy.group('strike') # is the premium/entry price for a contract,
+            result['price'] = float(match_buy.group('price')) #AK - ENTRY PRISE - 380 for AMAZON
+            result['is_signal'] = True
             lines = [
-                f"┌─ 💵 Signal Parsed 💵",
-                f"│ Symbol: {symbol}",
-                f"│ Bid   : {bid}",
-                f"│ Ask   : {ask}",
-                f"│ LOTs  : {lots}",
+                "┌─ 💵 Signal Parsed 💵",
+                f"│ Symbol: {result['symbol']}",
+                f"│ Price: {result['price']}",
+                f"│ LOTs  : {result['LOTs']}",
                 "└─────────────────────"
             ]
             result["parsed_message"] = "\n".join(lines)
-            logger.info(f"💵 Signal parsed: {symbol} bid={bid} ask={ask} lots={lots}")
+        # match_sell={}
+        # match_close={}
+        # match_sell={}
 
-            executed = self.execute_operation(result)
-            if executed:
-                logger.info("Trade executed successfully after parsing.")
-            else:
-                logger.error("Trade execution failed after parsing.")
-        else:
-            logger.warning(f"Unable to parse signal from message: {message_text}")
 
         return result
 
-    def execute_operation(self, parsed: dict) -> bool:
-        """
-        Execute a market order based on parsed signal (BUY at ask price).
-        Ensures symbol is selected and tick available before sending.
-        """
-        if not parsed.get("is_signal"):
-            logger.warning("execute_operation called with no signal.")
-            return False
-
-        symbol = parsed.get("symbol")
-        lot = parsed.get("lots", 0.1)
-        price = parsed.get("ask")
-
-
+    def execute_BUY_operation(self, parsed: dict) -> bool:
+        symbol = parsed["symbol"]
         if not mt5.symbol_select(symbol, True):
-            logger.error(f"Failed to select symbol {symbol}")
+            logger.error(f"Symbol {symbol} not found")
             return False
-        
+
+        info = mt5.symbol_info(symbol)
+        if info is None:
+            logger.error(f"No info for {symbol}")
+            return False
+
+        # Forex trades run almost around the clock
+        if info.trade_mode != mt5.SYMBOL_TRADE_MODE_FULL:
+            logger.warning(f"Market closed for {symbol} (mode={info.trade_mode})")
+            return False
         tick = mt5.symbol_info_tick(symbol)
         if tick is None:
             logger.error(f"No tick data for {symbol}")
             return False
 
+        # enforce volume step & bounds
+        vol = max(info.volume_min, min(info.volume_max, parsed["LOTs"]))
+        vol = round(vol / info.volume_step) * info.volume_step
+
         request = {
-            "action": mt5.TRADE_ACTION_DEAL,
-            "symbol": symbol,
-            "volume": lot,
-            "type": mt5.ORDER_TYPE_BUY,
-            "price": price or tick.ask,
-            "sl": 0.0,
-            "tp": 0.0,
-            "deviation": 10,
-            "magic": 234000,
-            "comment": "Python MT5 Signal",
-            "type_time": mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC,
+            "action":      mt5.TRADE_ACTION_DEAL,
+            "symbol":      symbol,
+            "volume":      vol,
+            "type":        mt5.ORDER_TYPE_BUY,         # Market buy
+            "price":       tick.ask,
+            "deviation":   10,
+            "magic":       234000,
+            "comment":     "BUY SIGNAL",
+            "type_time":   mt5.ORDER_TIME_GTC,
+            "type_filling":mt5.ORDER_FILLING_IOC,       # Immediate or cancel
         }
 
-        result = mt5.order_send(request)
-        if result is None:
-            error = mt5.last_error()
-            logger.error(f"Order send returned None: {error}")
+        logger.info(f"Sending MARKET BUY: {symbol} @ {tick.ask} lot={vol}")
+        res = mt5.order_send(request)
+        if res is None or res.retcode != mt5.TRADE_RETCODE_DONE:
+            errmsg = mt5.last_error() if res is None else f"{res.comment} (retcode={res.retcode})"
+            logger.error(f"Order failed: {errmsg}")
             return False
 
-        if result.retcode != mt5.TRADE_RETCODE_DONE:
-            logger.error(f"Order failed, retcode={result.retcode}, result={result}")
-            return False
-
-        logger.info(f"Order placed successfully, ticket={result.order}")
+        logger.info(f"BUY executed: {vol} lots of {symbol} @ {tick.ask}")
         return True
 
     def take_current_balance(self):
