@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 # Create router
 router = APIRouter(prefix="/ws", tags=["websocket"])
 
+
+
 # WebSocket connection manager
 class ConnectionManager:
     def __init__(self):
@@ -40,8 +42,10 @@ class ConnectionManager:
         self.listener_service: Optional[TelegramListenerService] = None
         # Store client credentials
         self.client_credentials: Dict[str, TelegramCredentials] = {}
-
+        
         self.mt5 = MetaTraderService()
+
+        self._current_lots = 0.1 
     
     async def connect(self, websocket: WebSocket, client_id: str) -> None:
         """Register new WebSocket connection."""
@@ -204,20 +208,20 @@ class ConnectionManager:
         }
         #TODO:
         self.mt5.test_connection()
-        parsed = self.mt5.parse_message(message.text)
+        parsed = self.mt5.parse_message(message.text,self._current_lots)
         if parsed["is_signal"] is True:
             message_data = {
             "event": "signal",
             "dialog_id": dialog_id,
             "message": {
                 "id": message.id,
-                "text": message.text,
+                "text": parsed["parsed_message"],
                 "date": message.date.isoformat(),
                 "sender": {
                     "id": sender.id if sender else None,
                     "first_name": getattr(sender, "first_name", None),
                     "last_name": getattr(sender, "last_name", None),
-                    "username": "Signal"
+                    "username": "📢 Signal 📢"
                 },
                 "has_media": bool(message.media)}}
             await self.broadcast_to_dialog_subscribers(dialog_id, message_data)
@@ -415,7 +419,28 @@ async def websocket_messages(
             data = await websocket.receive_text()
             try:
                 message = json.loads(data)
-                
+
+                if message.get("action") == "set_current_lots":
+                    new_value = float(message["value"])
+                    if new_value <= 0:
+                        raise ValueError("Lot size must be positive")
+                    manager._current_lots = new_value
+                    logger.info("___________________set_current_lots_________________________")
+                    logger.info(manager._current_lots)
+                    # Confirm update to sender
+                    await websocket.send_json({
+                        "event": "current_lots_updated",
+                        "value": new_value,
+                        "updated_by": client_id
+                    })
+                elif message.get("action") == "take_current_balance":
+                    data = manager.mt5.take_current_balance()
+                    await websocket.send_json({
+                        "event": "send_current_balance",
+                        "value": json.dumps(data),
+                        "updated_by": client_id
+                    })
+
                 # Handle authentication and credentials (for backward compatibility)
                 if "action" in message and message["action"] == "authenticate":
                     if "credentials" in message:
@@ -561,6 +586,14 @@ async def websocket_messages(
                             "event": "error",
                             "message": "No active Telegram session found. Please authenticate with Telegram first."
                         })
+
+                elif "action" in message and message["action"] == "set_current_lots":
+                    new_value = float(message["value"])
+                    await websocket.send_json({
+                        "event": "error",
+                        "message": "updated - LOTs - {}".format(new_value)
+                    })
+                
                 
                 # Handle invalid actions
                 else:
@@ -568,6 +601,8 @@ async def websocket_messages(
                         "event": "error",
                         "message": "Invalid message format or action"
                     })
+                
+                
                     
             except json.JSONDecodeError:
                 await websocket.send_json({

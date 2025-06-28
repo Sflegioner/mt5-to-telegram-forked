@@ -15,6 +15,8 @@ import {
   Select,
   MenuItem,
   DialogTitle,
+  Slider,
+  Container,
 } from '@mui/material';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import PauseIcon from '@mui/icons-material/Pause';
@@ -31,6 +33,7 @@ import {
   getStatusColor,
   getAnimationProps,
 } from './SyncCard';
+import { AdminPanalComponent } from '../AdminPanel/AdminPanelComponent';
 
 // Extend the base Sync interface to include entity_id
 interface Sync extends BaseSync {
@@ -84,6 +87,7 @@ export const SyncDetails: React.FC<SyncDetailsProps> = ({
   const [clientId, setClientId] = useState<string | null>(
     credentials?.api_id ? credentials.api_id.toString() : null
   );
+  const [LOTs, setLOTs] = useState<number>(0.1);
   const websocketRef = useRef<WebSocket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -532,12 +536,22 @@ export const SyncDetails: React.FC<SyncDetailsProps> = ({
     : {};
   const dialogProps = getConfirmDialogProps();
 
+  function handleLOTsChange(event: any, newValue: any) {
+    setLOTs(newValue);
+    if (websocketRef.current && isConnected) {
+      websocketRef.current.send(JSON.stringify({
+        action: 'set_current_lots',
+        value: newValue
+      }));
+    }
+  }
+
   return (
     <>
       <Dialog
         open={open}
         onClose={handleClose}
-        maxWidth='md'
+        maxWidth={"xl"}
         fullWidth
         PaperProps={{
           style: {
@@ -680,177 +694,199 @@ export const SyncDetails: React.FC<SyncDetailsProps> = ({
           <Divider
             sx={{ my: 2, backgroundColor: 'rgba(255, 255, 255, 0.12)' }}
           />
-
-          {/* Terminal-like Live Messages Display */}
-          <Paper
-            elevation={0}
-            sx={{
-              p: 0,
-              backgroundColor: '#1E1E1E',
-              borderRadius: '8px',
-              height: '400px',
-              fontFamily: 'monospace',
-              position: 'relative',
-              overflow: 'hidden',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-            }}
+          <Container
+            style={{ display: "flex", justifyContent: "center", gap: 20 }}
           >
-            {/* Terminal Header */}
-            <Box
+            <Paper
+              elevation={0}
               sx={{
-                p: 1,
-                backgroundColor: '#323232',
-                borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
+                p: 0,
+                backgroundColor: '#1E1E1E',
+                borderRadius: '8px',
+                height: '400px',
+                width: '700px',
+                fontFamily: 'monospace',
+                position: 'relative',
+                overflow: 'hidden',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
               }}
             >
-              <Typography
-                variant='body2'
-                fontFamily='monospace'
-                fontWeight='bold'
-                color='rgba(255, 255, 255, 0.8)'
-              >
-                {`📱 ${currentSync.discussion_name} - ${isConnected ? 'Connected' : 'Disconnected'
-                  }`}
-              </Typography>
-
+              {/* Terminal Header */}
               <Box
                 sx={{
-                  width: 10,
-                  height: 10,
-                  borderRadius: '50%',
-                  backgroundColor: isConnected ? '#4caf50' : '#f44336',
+                  p: 1,
+                  backgroundColor: '#323232',
+                  borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
                 }}
-              />
-            </Box>
+              >
+                <Typography
+                  variant='body2'
+                  fontFamily='monospace'
+                  fontWeight='bold'
+                  color='rgba(255, 255, 255, 0.8)'
+                >
+                  {`</> ${currentSync.discussion_name} - ${isConnected ? 'Connected' : 'Disconnected'
+                    }`}
+                </Typography>
 
-            {/* Terminal Content */}
-            <Box
-              sx={{
-                p: 2,
-                height: 'calc(100% - 40px)',
-                overflowY: 'auto',
-                '&::-webkit-scrollbar': {
-                  width: '8px',
-                },
-                '&::-webkit-scrollbar-track': {
-                  background: '#2D2D2D',
-                },
-                '&::-webkit-scrollbar-thumb': {
-                  background: '#555',
-                  borderRadius: '4px',
-                },
-                '&::-webkit-scrollbar-thumb:hover': {
-                  background: '#777',
-                },
-              }}
-            >
-              {messages.length === 0 ? (
                 <Box
                   sx={{
-                    height: '100%',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: 'rgba(255, 255, 255, 0.5)',
-                    gap: 2,
+                    width: 10,
+                    height: 10,
+                    borderRadius: '50%',
+                    backgroundColor: isConnected ? '#4caf50' : '#f44336',
                   }}
-                >
-                  <Typography
-                    variant='body1'
-                    fontFamily='monospace'
-                    align='center'
-                  >
-                    Waiting for messages from {currentSync.discussion_name}...
-                  </Typography>
-                  <Typography
-                    variant='caption'
-                    fontFamily='monospace'
-                    color='rgba(255, 255, 255, 0.4)'
-                    align='center'
-                  >
-                    {isConnected
-                      ? 'WebSocket connected. New messages will appear here in real-time.'
-                      : 'Connecting to WebSocket service...'}
-                  </Typography>
-                </Box>
-              ) : (
-                messages.map((message) => (
-                  <Box key={`${message.id}-${message.date}`} sx={{ mb: 1.5 }}>
-                    {/* Timestamp + Sender */}
-                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
-                      <Typography
-                        variant='caption'
-                        component='span'
-                        sx={{
-                          color: 'rgba(255, 255, 255, 0.5)',
-                          fontFamily: 'monospace',
-                        }}
-                      >
-                        [{formatTime(message.date)}]
-                      </Typography>
+                />
+              </Box>
 
-                      <Typography
-                        variant='caption'
-                        component='span'
-                        sx={{
-                          ml: 1,
-                          color:
-                            message.sender.first_name === 'System'
-                              ? '#4caf50'
-                              : '#64b5f6',
-                          fontFamily: 'monospace',
-                          fontWeight: 'bold',
-                        }}
-                      >
-                        {getSenderName(message)}:
-                      </Typography>
-                    </Box>
+              {/* Terminal Content */}
+              <Box
+                sx={{
+                  p: 2,
+                  height: 'calc(100% - 40px)',
+                  overflowY: 'auto',
+                  '&::-webkit-scrollbar': {
+                    width: '8px',
+                  },
+                  '&::-webkit-scrollbar-track': {
+                    background: '#2D2D2D',
+                  },
+                  '&::-webkit-scrollbar-thumb': {
+                    background: '#555',
+                    borderRadius: '4px',
+                  },
+                  '&::-webkit-scrollbar-thumb:hover': {
+                    background: '#777',
+                  },
+                }}
+              >
+                {messages.length === 0 ? (
+                  <Box
+                    sx={{
+                      height: '100%',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: 'rgba(255, 255, 255, 0.5)',
+                      gap: 2,
+                    }}
+                  >
                     <Typography
-                      variant="body2"
-                      sx={{
-                        color:
-                          message.sender.username === 'Signal'
-                            ? '#FFFF3C'  
-                            : 'white',    
-                        fontFamily: 'monospace',
-                        whiteSpace: 'pre-wrap',
-                        wordBreak: 'break-word',
-                        pl: 2,
-                      }}
+                      variant='body1'
+                      fontFamily='monospace'
+                      align='center'
                     >
-                      {message.text}
-
-                      {message.has_media && (
-                        <Typography
-                          component="span"
-                          variant="body2"
-                          sx={{
-                            color:
-                              message.sender.username === 'Signal'
-                                ? '#FFFF3C'   
-                                : '#FFA726',  
-                            fontFamily: 'monospace',
-                            pl: 2,
-                          }}
-                        >
-                          {' '}
-                          [media attachment]
-                        </Typography>
-                      )}
+                      Waiting for messages from {currentSync.discussion_name}...
+                    </Typography>
+                    <Typography
+                      variant='caption'
+                      fontFamily='monospace'
+                      color='rgba(255, 255, 255, 0.4)'
+                      align='center'
+                    >
+                      {isConnected
+                        ? 'WebSocket connected. New messages will appear here in real-time.'
+                        : 'Connecting to WebSocket service...'}
                     </Typography>
                   </Box>
-                ))
-              )}
-              <div ref={messagesEndRef} />
-            </Box>
-          </Paper>
+                ) : (
+                  messages.map((message) => (
+                    <Box key={`${message.id}-${message.date}`} sx={{ mb: 1.5 }}>
+                      {/* Timestamp + Sender */}
+                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
+                        <Typography
+                          variant='caption'
+                          component='span'
+                          sx={{
+                            color: 'rgba(255, 255, 255, 0.5)',
+                            fontFamily: 'monospace',
+                          }}
+                        >
+                          [{formatTime(message.date)}]
+                        </Typography>
+
+                        <Typography
+                          variant='caption'
+                          component='span'
+                          sx={{
+                            ml: 1,
+                            color:
+                              message.sender.first_name === 'System'
+                                ? '#4caf50'
+                                : '#64b5f6',
+                            fontFamily: 'monospace',
+                            fontWeight: 'bold',
+                          }}
+                        >
+                          {getSenderName(message)}:
+                        </Typography>
+                      </Box>
+                      <Typography
+                        variant="body2"
+                        sx={{
+                          color:
+                            message.sender.username === '📢 Signal 📢'
+                              ? '#FFFF3C'
+                              : 'white',
+                          fontFamily: 'monospace',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word',
+                          pl: 2,
+                        }}
+                      >
+                        {message.text}
+
+                        {message.has_media && (
+                          <Typography
+                            component="span"
+                            variant="body2"
+                            sx={{
+                              color:
+                                message.sender.username === '📢 Signal 📢'
+                                  ? '#FFFF3C'
+                                  : '#FFA726',
+                              fontFamily: 'monospace',
+                              pl: 2,
+                            }}
+                          >
+                            {' '}
+                            [media attachment]
+                          </Typography>
+                        )}
+                      </Typography>
+                    </Box>
+                  ))
+                )}
+                <div ref={messagesEndRef} />
+              </Box>
+            </Paper>
+            {websocketRef.current ? (
+              <AdminPanalComponent ws={websocketRef.current} />
+            ) : (
+              <>No connection</>
+            )}
+          </Container>
+          {/* Terminal-like Live Messages Display */}
+
         </DialogContent>
 
         <DialogActions sx={{ px: 3, pb: 3 }}>
+          <p>LOTs: {LOTs}</p>
+          <Slider
+            style={{ maxWidth: 200 }}
+            value={LOTs}
+            max={1}
+            min={0.1}
+            onChange={handleLOTsChange}
+            valueLabelDisplay="auto"
+            aria-label="LOTs"
+            step={0.1}
+
+          ></Slider>
           <Button
             onClick={handleClose}
             variant='outlined'
@@ -858,6 +894,7 @@ export const SyncDetails: React.FC<SyncDetailsProps> = ({
           >
             {t('common.close')}
           </Button>
+          {/*TODO*/}
         </DialogActions>
       </Dialog>
 
@@ -880,6 +917,7 @@ export const SyncDetails: React.FC<SyncDetailsProps> = ({
         <DialogTitle sx={{ color: 'white' }}>
           {t('sync.settings.title')}
         </DialogTitle>
+
         <DialogContent sx={{ pt: 2 }}>
           <TextField
             label={t('sync.settings.name')}

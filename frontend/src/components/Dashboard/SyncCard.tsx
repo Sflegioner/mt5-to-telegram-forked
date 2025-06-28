@@ -389,7 +389,7 @@ export const SyncCard: React.FC<SyncCardProps> = ({
                 )}
               </Tooltip>
             )}
-
+            <></>
             {/* Delete button (always visible as last button) */}
             <Tooltip title={t('sync.tooltip.delete')}>
               {isLoading ? (
@@ -452,6 +452,7 @@ export const SyncCard: React.FC<SyncCardProps> = ({
           </Typography>
         </Box>
       </Box>
+      
 
       {/* Confirmation dialog */}
       <ConfirmDialog
