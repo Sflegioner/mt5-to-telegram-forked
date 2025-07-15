@@ -69,6 +69,7 @@ class MetaTraderService:
             "LOTs": 0.01
         }
         match_buy=re.search(r'KAUFE\s+(?P<symbol>\w+)(?:\s+(?P<option>CALL|PUT)\s+(?P<strike>\d+))?.*EK:\s*(?P<price>[\d\.]+)', message_text, re.IGNORECASE)
+        #match_sell=re.search(r'ICH VERKAUFE\s+(?P<symbol>)\w+)(?:\s+(?P<option>CALL|PUT)')
         #logger.warning(mt5.symbol_info("AMZN")._asdict())
         if match_buy:
             result['type'] = 'BUY'
@@ -79,9 +80,11 @@ class MetaTraderService:
             result['is_signal'] = True
             lines = [
                 "┌─ 💵 Signal Parsed 💵",
+                f"│ Type: {result['type']}",
                 f"│ Symbol: {result['symbol']}",
                 f"│ Price: {result['price']}",
                 f"│ LOTs  : {result['LOTs']}",
+                f""
                 "└─────────────────────"
             ]
             result["parsed_message"] = "\n".join(lines)
@@ -92,52 +95,77 @@ class MetaTraderService:
 
         return result
 
-    def execute_BUY_operation(self, parsed: dict) -> bool:
+    def execute_BUY_operation(self, parsed: dict) -> dict:
+        """
+        Execute operation and return a dict with keys:
+        - type: "BUY_mt5" or "error_mt5"
+        - mt5_message: текст повідомлення для користувача
+        """
         symbol = parsed["symbol"]
+        final_msg = {
+            "type": "error_mt5",
+            "mt5_message": None
+        }
+
         if not mt5.symbol_select(symbol, True):
-            logger.error(f"Symbol {symbol} not found")
-            return False
+            errmsg = f"Symbol {symbol} not found"
+            logger.error(errmsg)
+            final_msg["mt5_message"] = errmsg
+            return final_msg
+
 
         info = mt5.symbol_info(symbol)
         if info is None:
-            logger.error(f"No info for {symbol}")
-            return False
+            errmsg = f"No info for {symbol}"
+            logger.error(errmsg)
+            final_msg["mt5_message"] = errmsg
+            return final_msg
 
-        # Forex trades run almost around the clock
+
         if info.trade_mode != mt5.SYMBOL_TRADE_MODE_FULL:
-            logger.warning(f"Market closed for {symbol} (mode={info.trade_mode})")
-            return False
+            errmsg = f"Market closed for {symbol} (mode={info.trade_mode})"
+            logger.warning(errmsg)
+            final_msg["mt5_message"] = errmsg
+            return final_msg
+
         tick = mt5.symbol_info_tick(symbol)
         if tick is None:
-            logger.error(f"No tick data for {symbol}")
-            return False
+            errmsg = f"No tick data for {symbol}"
+            logger.error(errmsg)
+            final_msg["mt5_message"] = errmsg
+            return final_msg
 
-        # enforce volume step & bounds
         vol = max(info.volume_min, min(info.volume_max, parsed["LOTs"]))
         vol = round(vol / info.volume_step) * info.volume_step
 
         request = {
-            "action":      mt5.TRADE_ACTION_DEAL,
-            "symbol":      symbol,
-            "volume":      vol,
-            "type":        mt5.ORDER_TYPE_BUY,         # Market buy
-            "price":       tick.ask,
-            "deviation":   10,
-            "magic":       234000,
-            "comment":     "BUY SIGNAL",
-            "type_time":   mt5.ORDER_TIME_GTC,
-            "type_filling":mt5.ORDER_FILLING_IOC,       # Immediate or cancel
+            "action":       mt5.TRADE_ACTION_DEAL,
+            "symbol":       symbol,
+            "volume":       vol,
+            "type":         mt5.ORDER_TYPE_BUY,
+            "price":        tick.ask,
+            "deviation":    10,
+            "magic":        234000,
+            "comment":      "BUY SIGNAL",
+            "type_time":    mt5.ORDER_TIME_GTC,
+            "type_filling": mt5.ORDER_FILLING_IOC,
         }
 
-        logger.info(f"Sending MARKET BUY: {symbol} @ {tick.ask} lot={vol}")
         res = mt5.order_send(request)
         if res is None or res.retcode != mt5.TRADE_RETCODE_DONE:
-            errmsg = mt5.last_error() if res is None else f"{res.comment} (retcode={res.retcode})"
-            logger.error(f"Order failed: {errmsg}")
-            return False
+            errmsg = res.comment if res else str(mt5.last_error())
+            full_err = f"Order failed: {errmsg} (retcode={getattr(res, 'retcode', 'N/A')})"
+            logger.error(full_err)
+            final_msg["mt5_message"] = full_err
+            return final_msg
 
-        logger.info(f"BUY executed: {vol} lots of {symbol} @ {tick.ask}")
-        return True
+        #SUCSESS
+        success_msg = f"BUY executed: {vol} lots of {symbol} @ {tick.ask}"
+        logger.info(success_msg)
+        return {
+            "type":        "BUY_mt5",
+            "mt5_message": success_msg
+        }
 
     def take_current_balance(self):
         account_info = mt5.account_info()

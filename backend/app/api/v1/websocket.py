@@ -210,22 +210,37 @@ class ConnectionManager:
         self.mt5.test_connection()
         parsed = self.mt5.parse_message(message.text,self._current_lots)
         if parsed["is_signal"] is True:
-            resylt = self.mt5.execute_BUY_operation(parsed)
-            message_data = {
-            "event": "signal",
-            "dialog_id": dialog_id,
-            "message": {
-                "id": message.id,
-                "text": parsed["parsed_message"],
-                "date": message.date.isoformat(),
-                "sender": {
-                    "id": sender.id if sender else None,
-                    "first_name": getattr(sender, "first_name", None),
-                    "last_name": getattr(sender, "last_name", None),
-                    "username": "📢 Signal 📢"
-                },
-                "has_media": bool(message.media)}}
-            await self.broadcast_to_dialog_subscribers(dialog_id, message_data)
+#______________________________________________________________________________________________
+            if parsed["type"]=="BUY":
+                message_data = {
+                    "event": "signal",
+                    "dialog_id": dialog_id,
+                    "message": {
+                        "id": message.id,
+                        "text": parsed["parsed_message"],
+                        "date": message.date.isoformat(),
+                        "sender": {
+                            "id": sender.id if sender else None,
+                            "first_name": getattr(sender, "first_name", None),
+                            "last_name": getattr(sender, "last_name", None),
+                            "username": "📢 Signal 📢"
+                        },
+                        "has_media": bool(message.media)}}
+                await self.broadcast_to_dialog_subscribers(dialog_id, message_data)
+                result = self.mt5.execute_BUY_operation(parsed)
+                if result["type"] == "BUY_mt5":
+                    message_data["event"] = "executed_operation_info"
+                    message_data["message"]["text"] = result["mt5_message"]
+                    message_data["message"]["sender"]["username"]="MT5 info:"
+                elif result["type"]=="error_mt5":
+                    message_data["event"] = "error_mt5"
+                    message_data["message"]["text"] = result["mt5_message"]
+                    message_data["message"]["sender"]["username"]="MT5 error:"
+                await self.broadcast_to_dialog_subscribers(dialog_id, message_data)
+#______________________________________________________________________________________________
+            #elif parsed["type"]=="SELL":
+            #elif parsed["type"]=="SET":
+            #elif parsed["type"]=="CLOSE":
         else:
         # Send to all subscribers
             await self.broadcast_to_dialog_subscribers(dialog_id, message_data)

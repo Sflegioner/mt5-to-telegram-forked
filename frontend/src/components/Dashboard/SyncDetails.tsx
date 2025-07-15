@@ -91,6 +91,19 @@ export const SyncDetails: React.FC<SyncDetailsProps> = ({
   const websocketRef = useRef<WebSocket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  const colorStatus = (TypeOfMessage: string | any) => {
+    switch (TypeOfMessage) {
+      case '📢 Signal 📢':
+        return '#FFFF3C'
+      case "MT5 info:":
+        return '#00b828ff'
+      case "MT5 error:":
+        return '#ec1616ff'
+      default:
+        return 'white'
+    }
+  }
+
   // Update current sync when prop changes
   useEffect(() => {
     setCurrentSync(sync);
@@ -277,6 +290,12 @@ export const SyncDetails: React.FC<SyncDetailsProps> = ({
       } else if (data.event === 'signal') {
         //TODO
         console.log("SIGNAL HAS FOUND");
+        setMessages((prev) => [...prev, data.message]);
+      } else if (data.event === 'executed_operation_info') {
+        console.log(data.message.text);
+        setMessages((prev) => [...prev, data.message]);
+      } else if (data.event === 'error_mt5') {
+        console.log(data.message.text);
         setMessages((prev) => [...prev, data.message]);
       } else if (data.event === 'subscription_update') {
         if (data.subscribed) {
@@ -828,10 +847,7 @@ export const SyncDetails: React.FC<SyncDetailsProps> = ({
                       <Typography
                         variant="body2"
                         sx={{
-                          color:
-                            message.sender.username === '📢 Signal 📢'
-                              ? '#FFFF3C'
-                              : 'white',
+                          color: colorStatus(message.sender.username),
                           fontFamily: 'monospace',
                           whiteSpace: 'pre-wrap',
                           wordBreak: 'break-word',
