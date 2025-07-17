@@ -264,12 +264,67 @@ class ConnectionManager:
                     message_data["message"]["text"] = result["mt5_message"]
                     message_data["message"]["sender"]["username"]="MT5 error:"
                 await self.broadcast_to_dialog_subscribers(dialog_id, message_data)
-#__________________________________________SELL____________________________________________________
-            #elif parsed["type"]=="SELL":
-            #elif parsed["type"]=="SET":
-            #elif parsed["type"]=="CLOSE":
+#__________________________________________SET____________________________________________________
+            if parsed["type"] == "SET":
+                    message_data = {
+                        "event": "signal",
+                        "dialog_id": dialog_id,
+                        "message": {
+                            "id": message.id,
+                            "text": parsed["parsed_message"],
+                            "date": message.date.isoformat(),
+                            "sender": {
+                                "id": sender.id if sender else None,
+                                "first_name": getattr(sender, "first_name", None),
+                                "last_name": getattr(sender, "last_name", None),
+                                "username": "📢 Signal 📢"
+                            },
+                            "has_media": bool(message.media)
+                        }
+                    }
+                    await self.broadcast_to_dialog_subscribers(dialog_id, message_data)
+                    result = self.mt5.execute_SET_operation(parsed)
+                    if result["type"] == "SET_mt5":
+                        message_data["event"] = "executed_operation_info"
+                        message_data["message"]["text"] = result["mt5_message"]
+                        message_data["message"]["sender"]["username"] = "MT5 info:"
+                    elif result["type"] == "error_mt5":
+                        message_data["event"] = "error_mt5"
+                        message_data["message"]["text"] = result["mt5_message"]
+                        message_data["message"]["sender"]["username"] = "MT5 error:"
+                    await self.broadcast_to_dialog_subscribers(dialog_id, message_data)
+
+#__________________________________________CLOSE__________________________________________________
+            if parsed["type"] == "CLOSE":
+                    message_data = {
+                        "event": "signal",
+                        "dialog_id": dialog_id,
+                        "message": {
+                            "id": message.id,
+                            "text": parsed["parsed_message"],
+                            "date": message.date.isoformat(),
+                            "sender": {
+                                "id": sender.id if sender else None,
+                                "first_name": getattr(sender, "first_name", None),
+                                "last_name": getattr(sender, "last_name", None),
+                                "username": "📢 Signal 📢"
+                            },
+                            "has_media": bool(message.media)
+                        }
+                    }
+                    await self.broadcast_to_dialog_subscribers(dialog_id, message_data)
+                    result = self.mt5.execute_CLOSE_operation(parsed)
+                    if result["type"] == "CLOSE_mt5":
+                        message_data["event"] = "executed_operation_info"
+                        message_data["message"]["text"] = result["mt5_message"]
+                        message_data["message"]["sender"]["username"] = "MT5 info:"
+                    elif result["type"] == "error_mt5":
+                        message_data["event"] = "error_mt5"
+                        message_data["message"]["text"] = result["mt5_message"]
+                        message_data["message"]["sender"]["username"] = "MT5 error:"
+                    await self.broadcast_to_dialog_subscribers(dialog_id, message_data)
         else:
-        # Send to all subscribers
+            # Send to all subscribers
             await self.broadcast_to_dialog_subscribers(dialog_id, message_data)
 
     # Add a method to create and initialize a listener service with credentials
