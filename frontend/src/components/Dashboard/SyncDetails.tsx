@@ -33,7 +33,7 @@ import {
   getStatusColor,
   getAnimationProps,
 } from './SyncCard';
-import { AdminPanalComponent } from '../AdminPanel/AdminPanelComponent';
+import { AdminPanelComponent } from '../AdminPanel/AdminPanelComponent';
 
 // Extend the base Sync interface to include entity_id
 interface Sync extends BaseSync {
@@ -880,11 +880,9 @@ export const SyncDetails: React.FC<SyncDetailsProps> = ({
                 <div ref={messagesEndRef} />
               </Box>
             </Paper>
-            {/* {websocketRef.current ? (
-              <AdminPanalComponent ws={websocketRef.current} />
-            ) : (
-              <>No connection</>
-            )} */}
+            {isConnected && websocketRef.current && (
+              <AdminPanelComponent ws={websocketRef.current} />
+            )}
           </Container>
           {/* Terminal-like Live Messages Display */}
 

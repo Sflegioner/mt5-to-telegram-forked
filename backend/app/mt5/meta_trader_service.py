@@ -391,7 +391,7 @@ class MetaTraderService:
                 "price":        price,
                 "deviation":    10,
                 "magic":        234000,
-                "comment":      f"CLOSE SIGNAL ticket={ticket}",
+                "comment":      "CLOSE_SIGNAL",
                 "type_time":    mt5.ORDER_TIME_GTC,
                 "type_filling": mt5.ORDER_FILLING_IOC,
             }
