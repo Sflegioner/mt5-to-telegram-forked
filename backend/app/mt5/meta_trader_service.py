@@ -1,3 +1,4 @@
+from datetime import datetime
 import re
 import logging
 import MetaTrader5 as mt5
@@ -422,3 +423,34 @@ class MetaTraderService:
             logger.error("Failed to get account info")
             return None
         return account_info.balance
+    
+    def take_all_trades(self) -> list[dict]:
+        positions = mt5.positions_get()
+        if not positions:
+            return {"error": "No open positions"}
+
+        all_trades = []
+        for trade in positions:
+            tick = mt5.symbol_info_tick(trade.symbol)
+            if tick is None:
+                price_current = None
+            else:
+                price_current = tick.bid if trade.type == mt5.POSITION_TYPE_BUY else tick.ask
+
+            time_str = datetime.fromtimestamp(trade.time).isoformat(sep=' ', timespec='seconds')
+            trade_info = {
+                "Symbol":         trade.symbol,
+                "Ticket":         trade.ticket,
+                "Time":           time_str,                
+                "Type":           "BUY" if trade.type == mt5.POSITION_TYPE_BUY else "SELL",
+                "Volume":         trade.volume,
+                "Price(Open)":    trade.price_open,
+                "S/L":            trade.sl,
+                "T/P":            trade.tp,
+                "Price(Current)": price_current,
+                "Profit":         trade.profit
+            }
+            all_trades.append(trade_info)
+
+        return all_trades
+    

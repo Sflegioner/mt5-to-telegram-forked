@@ -538,9 +538,16 @@ async def websocket_messages(
                         "value": json.dumps(data),
                         "updated_by": client_id
                     })
+                elif message.get("action") == "take_all_trades":
+                    data = manager.mt5.take_all_trades()
+                    await websocket.send_json({
+                        "event": "send_all_trades",
+                        "value": data,
+                        "updated_by": client_id
+                    })
 
                 # Handle authentication and credentials (for backward compatibility)
-                if "action" in message and message["action"] == "authenticate":
+                elif "action" in message and message["action"] == "authenticate":
                     if "credentials" in message:
                         try:
                             credentials = TelegramCredentials(**message["credentials"])
