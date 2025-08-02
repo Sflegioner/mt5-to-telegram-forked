@@ -71,15 +71,31 @@ class MetaTraderService:
         logger.info(message_text)
         match_buy=re.search(r'\bKAUFE\b\s+(?P<symbol>\w+)(?:\s+(?P<option>CALL|PUT)\s+(?P<strike>\d+))?.*EK:\s*(?P<price>[\d\.]+)', message_text, re.IGNORECASE)
         match_sell=re.search(r'\bVERKAUFE\b\s+(?P<symbol>\w+)'r'(?:\s+(?P<option>CALL|PUT)\s+(?P<strike>\d+))?'r'.*EK[:：]?\s*(?P<price>[\d\.]+)',message_text,re.IGNORECASE)
-        match_set = re.search(
-            r'(?:\bich\s+)?'                                 #  "Ich "
-            r'(?:setze\s+den\s+SL\s+bei\s+)?'                # "setze den SL bei"
-            r'(?P<symbol>[A-Z0-9]+)'                         # SYMBOL
-            r'(?:\s+(?P<option>CALL|PUT)\s+(?P<strike>\d+))?'#  CALL/PUT + strike
-            r'.*?(?:auf|SL)[:：]?\s*'                        # "auf" або "SL:" 
-            r'(?P<price>\d+(?:[.,]\d+)?)',                   # price
+        match_set = re.search(r'''
+            # 1) Німецький варіант: "ich setze den SL|TP bei SYMBOL [CALL|PUT STRIKE] auf PRICE"
+            (?P<de>
+                ich\s+setze\s+den\s+(?P<mode_de>SL|TP)\s+bei\s+
+                (?P<symbol_de>[A-Z0-9]{3,})
+                (?:\s+(?P<option_de>CALL|PUT)\s+(?P<strike_de>\d+))?
+                \s+auf\s+(?P<price_de>[\d\.,]+)
+            )
+            |
+            # 2) Загальний формат: "SYMBOL [CALL|PUT STRIKE] ... SL:xxx ... TP:yyy"
+            (?P<gen>
+                (?P<symbol>[A-Z0-9]{3,})
+                (?:\s+(?P<option>CALL|PUT)\s+(?P<strike>\d+))?
+                (?:
+                    .*?
+                    SL[:：]?\s*(?P<sl>[\d\.,]+)
+                )?
+                (?:
+                    .*?
+                    TP[:：]?\s*(?P<tp>[\d\.,]+)
+                )?
+            )
+        ''',
             message_text,
-            re.IGNORECASE | re.DOTALL | re.MULTILINE
+            re.IGNORECASE | re.VERBOSE | re.DOTALL
         )
         match_close = re.search(
             r'SCHLIE\w*\s+'                          # ICH SCHLIEßE
@@ -95,7 +111,7 @@ class MetaTraderService:
             result.update({
                 "is_signal": True,
                 "type": "BUY",
-                "symbol": match_buy.group("symbol").upper(),
+                "symbol": match_buy.group("symbol"),
                 "option": (match_buy.group("option") or "").upper(),
                 "strike": match_buy.group("strike"),
                 "price": float(match_buy.group("price"))
@@ -104,27 +120,47 @@ class MetaTraderService:
             result.update({
                 "is_signal": True,
                 "type": "SELL",
-                "symbol": match_sell.group("symbol").upper(),
-                "option": (match_sell.group("option") or "").upper(),
+                "symbol": match_sell.group("symbol"),
+                "option": (match_sell.group("option") or ""),
                 "strike": match_sell.group("strike"),
                 "price": float(match_sell.group("price"))
             })
-        elif match_set:
-            logger.info("SET FIND")
+        if match_set:
+            if match_set.group('de'):
+                symbol = match_set.group('symbol_de').upper()
+                option = (match_set.group('option_de') or "").upper()
+                strike = match_set.group('strike_de')
+
+                price_val = float(match_set.group('price_de').replace(',', '.'))
+                if match_set.group('mode_de').upper() == 'SL':
+                    sl, tp = price_val, None
+                else:
+                    sl, tp = None, price_val
+            else:
+                symbol = match_set.group('symbol').upper()
+                option = (match_set.group('option') or "").upper()
+                strike = match_set.group('strike')
+
+                sl_str = match_set.group('sl')
+                tp_str = match_set.group('tp')
+                sl = float(sl_str.replace(',', '.')) if sl_str else None
+                tp = float(tp_str.replace(',', '.')) if tp_str else None
+
             result.update({
                 "is_signal": True,
-                "type": "SET",
-                "symbol": match_set.group("symbol").upper(),
-                "option": (match_set.group("option") or "").upper(),
-                "strike": match_set.group("strike"),
-                "price": float(match_set.group("price"))
+                "type":      "SET",
+                "symbol":    symbol,
+                "option":    option,
+                "strike":    strike,
+                "sl":        sl,
+                "tp":        tp,
             })
         elif match_close:
             raw_price = match_close.group("price").replace('.', '').replace(',', '.')
             result.update({
                 "is_signal": True,
                 "type": "CLOSE",
-                "symbol": match_close.group("symbol").upper(),
+                "symbol": match_close.group("symbol"),
                 "option": (match_close.group("option") or "").upper(),
                 "strike": match_close.group("strike"),
                 "price": float(raw_price)
@@ -138,13 +174,14 @@ class MetaTraderService:
                 f"│ Option: {result['option'] or '-'}",
                 f"│ Strike: {result['strike'] or '-'}",
                 f"│ Price:  {result['price']}",
+                f"│ SL:     {result['sl'] or "-"}",
+                f"│ TP:     {result['tp'] or "-"}",
                 f"│ LOTs:   {result['LOTs']}",
                 "└─────────────────────"
             ]
             result["parsed_message"] = "\n".join(lines)
         else:
             result["parsed_message"] = None 
-
         return result
 
     def execute_BUY_operation(self, parsed: dict) -> dict:
@@ -200,7 +237,7 @@ class MetaTraderService:
             "magic":        234000,
             "comment":      "BUY SIGNAL",
             "type_time":    mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC,
+            "type_filling": mt5.ORDER_FILLING_FOK,
         }
 
         res = mt5.order_send(request)
@@ -271,7 +308,7 @@ class MetaTraderService:
             "magic":        234000,
             "comment":      "SELL SIGNAL",
             "type_time":    mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC,
+            "type_filling": mt5.ORDER_FILLING_FOK,
         }
 
         res = mt5.order_send(request)
@@ -290,59 +327,67 @@ class MetaTraderService:
         }
     
     def execute_SET_operation(self, parsed: dict) -> dict:
-        """
-        Execute a SET (stop-loss) modification in MT5.
-        Returns a dict with keys:
-        - type: "SET_mt5" or "error_mt5"
-        - mt5_message: human-readable result or error
-        """
         symbol = parsed["symbol"]
-        sl_price = parsed["price"]
-        final_msg = {"type": "error_mt5", "mt5_message": None}
-
-        # Ensure symbol is available
+        sl_price = parsed.get("sl")
+        tp_price = parsed.get("tp", None)
+        
         if not mt5.symbol_select(symbol, True):
-            errmsg = f"Symbol {symbol} not found"
-            logger.error(errmsg)
-            final_msg["mt5_message"] = errmsg
-            return final_msg
+            return {"type": "error_mt5", "mt5_message": f"Symbol {symbol} not found"}
 
-        # Retrieve open positions for this symbol
         positions = mt5.positions_get(symbol=symbol)
-        if positions is None or len(positions) == 0:
-            errmsg = f"No open positions for {symbol}"
-            logger.error(errmsg)
-            final_msg["mt5_message"] = errmsg
-            return final_msg
+        if not positions:
+            return {"type": "error_mt5", "mt5_message": f"No open positions for {symbol}"}
+        
+        pos = positions[0]
+        ticket = pos.ticket
+        position_type = pos.type  
+        if sl_price is None:
+            sl_price = pos.sl
+        if tp_price is None:
+            tp_price = pos.tp
+        info = mt5.symbol_info(symbol)
+        if info is None:
+            return {"type": "error_mt5", "mt5_message": f"No market data for {symbol}"}
+        
+        digits = info.digits  # Decimal precision required
+        point = info.point   # Smallest price unit
 
-        # Pick the first position (or refine by option/strike if needed)
-        position = positions[0]
-        ticket = position.ticket
-        current_tp = position.tp if position.tp is not None else 0.0
+        # Get current price for validation
+        tick = mt5.symbol_info_tick(symbol)
+        if tick is None:
+            return {"type": "error_mt5", "mt5_message": f"No current price for {symbol}"}
+        current_price = tick.ask if position_type == mt5.POSITION_TYPE_SELL else tick.bid
 
-        # Build modification request
+        # Normalize prices to correct decimal places
+        if sl_price is not None:
+            sl_price = round(float(sl_price), digits)
+        if tp_price is not None:
+            tp_price = round(float(tp_price), digits)
+
+        # Validate SL position
+        if sl_price is not None:
+            if position_type == mt5.POSITION_TYPE_BUY:
+                if sl_price >= current_price:
+                    return {"type": "error_mt5", "mt5_message": f"SL must be below current price ({current_price}) for BUY positions"}
+            else:  # SELL position
+                if sl_price <= current_price:
+                    return {"type": "error_mt5", "mt5_message": f"SL must be above current price ({current_price}) for SELL positions"}
+
         request = {
-            "action":    mt5.TRADE_ACTION_SLTP,
-            "position":  ticket,
-            "sl":        sl_price,
-            "tp":        current_tp,
-            "magic":     234000,
-            "comment":   "SET SL SIGNAL"
+            "action": mt5.TRADE_ACTION_SLTP,
+            "position": ticket,
+            "sl": sl_price,
+            "tp": tp_price,
+            "magic": 234000,
+            "comment": "SET SL SIGNAL"
         }
 
-        # Send modification
         res = mt5.order_send(request)
-        if res is None or res.retcode != mt5.TRADE_RETCODE_DONE:
+        if not res or res.retcode != mt5.TRADE_RETCODE_DONE:
             errmsg = res.comment if res else str(mt5.last_error())
-            full_err = f"SET SL failed: {errmsg} (retcode={getattr(res, 'retcode', 'N/A')})"
-            logger.error(full_err)
-            final_msg["mt5_message"] = full_err
-            return final_msg
+            return {"type": "error_mt5", "mt5_message": f"SET failed: {errmsg} (retcode={getattr(res, 'retcode', 'N/A')}"}
 
-        # Success
-        success_msg = f"SL set for position {ticket} of {symbol} @ {sl_price}"
-        logger.info(success_msg)
-        return {"type": "SET_mt5", "mt5_message": success_msg}
+        return {"type": "SET_mt5", "mt5_message": f"SL/TP updated for {symbol} (Ticket: {ticket})"}
     
     def execute_CLOSE_operation(self, parsed: dict) -> dict:
         """
@@ -394,7 +439,7 @@ class MetaTraderService:
                 "magic":        234000,
                 "comment":      "CLOSE_SIGNAL",
                 "type_time":    mt5.ORDER_TIME_GTC,
-                "type_filling": mt5.ORDER_FILLING_IOC,
+                "type_filling": mt5.ORDER_FILLING_FOK,
             }
 
             res = mt5.order_send(request)

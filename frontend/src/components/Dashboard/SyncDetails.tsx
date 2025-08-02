@@ -889,18 +889,6 @@ export const SyncDetails: React.FC<SyncDetailsProps> = ({
         </DialogContent>
 
         <DialogActions sx={{ px: 3, pb: 3 }}>
-          <p>LOTs: {LOTs}</p>
-          <Slider
-            style={{ maxWidth: 200 }}
-            value={LOTs}
-            max={1}
-            min={0.1}
-            onChange={handleLOTsChange}
-            valueLabelDisplay="auto"
-            aria-label="LOTs"
-            step={0.1}
-
-          ></Slider>
           <Button
             onClick={handleClose}
             variant='outlined'
