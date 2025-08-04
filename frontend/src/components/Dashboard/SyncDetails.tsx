@@ -555,15 +555,6 @@ export const SyncDetails: React.FC<SyncDetailsProps> = ({
     : {};
   const dialogProps = getConfirmDialogProps();
 
-  function handleLOTsChange(event: any, newValue: any) {
-    setLOTs(newValue);
-    if (websocketRef.current && isConnected) {
-      websocketRef.current.send(JSON.stringify({
-        action: 'set_current_lots',
-        value: newValue
-      }));
-    }
-  }
 
   return (
     <>

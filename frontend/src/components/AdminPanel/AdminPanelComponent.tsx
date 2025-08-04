@@ -112,7 +112,7 @@ export const AdminPanelComponent = ({ ws }: { ws: WebSocket }) => {
           </Typography>
         </Box>
         {statusBox === "Account status" && <AccountStatusComponent allTrades={allTrades} />}
-        {statusBox === "LOTs manager" && <LotsManagerComponent />}
+        {statusBox === "LOTs manager" && <LotsManagerComponent ws={ws} />}
         {statusBox === "Multiplicator" && <MultiplicatorComponent />}
 
 

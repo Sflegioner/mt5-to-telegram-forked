@@ -72,7 +72,6 @@ class MetaTraderService:
         match_buy=re.search(r'\bKAUFE\b\s+(?P<symbol>\w+)(?:\s+(?P<option>CALL|PUT)\s+(?P<strike>\d+))?.*EK:\s*(?P<price>[\d\.]+)', message_text, re.IGNORECASE)
         match_sell=re.search(r'\bVERKAUFE\b\s+(?P<symbol>\w+)'r'(?:\s+(?P<option>CALL|PUT)\s+(?P<strike>\d+))?'r'.*EK[:：]?\s*(?P<price>[\d\.]+)',message_text,re.IGNORECASE)
         match_set = re.search(r'''
-            # 1) Німецький варіант: "ich setze den SL|TP bei SYMBOL [CALL|PUT STRIKE] auf PRICE"
             (?P<de>
                 ich\s+setze\s+den\s+(?P<mode_de>SL|TP)\s+bei\s+
                 (?P<symbol_de>[A-Z0-9]{3,})
@@ -80,7 +79,6 @@ class MetaTraderService:
                 \s+auf\s+(?P<price_de>[\d\.,]+)
             )
             |
-            # 2) Загальний формат: "SYMBOL [CALL|PUT STRIKE] ... SL:xxx ... TP:yyy"
             (?P<gen>
                 (?P<symbol>[A-Z0-9]{3,})
                 (?:\s+(?P<option>CALL|PUT)\s+(?P<strike>\d+))?
@@ -468,6 +466,18 @@ class MetaTraderService:
             logger.error("Failed to get account info")
             return None
         return account_info.balance
+    
+    def calculate_LOTs(balance_options):
+        percent = balance_options.percent
+        reinvest = balance_options.reinvest
+        
+
+        if balance_options.methode == "methode 1":
+            pass
+        if balance_options.methode == "methode 2":
+            pass
+        
+
     
     def take_all_trades(self) -> list[dict]:
         positions = mt5.positions_get()
