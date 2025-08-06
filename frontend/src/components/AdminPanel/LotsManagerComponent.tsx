@@ -27,9 +27,9 @@ export const LotsManagerComponent = ({ ws }: { ws: WebSocket }) => {
       JSON.stringify({
         action: "set_current_lots",
         value: {
-          method,
-          percentage,
-          reinvest,
+          "method":method,
+          "percentage":percentage,
+          "reinvest":reinvest,
         },
       })
     );

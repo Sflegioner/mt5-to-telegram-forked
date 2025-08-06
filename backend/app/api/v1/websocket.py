@@ -519,16 +519,13 @@ async def websocket_messages(
                 message = json.loads(data)
 
                 if message.get("action") == "set_current_lots":
-                    new_value = float(message["value"])
-                    if new_value <= 0:
-                        raise ValueError("Lot size must be positive")
-                    manager._current_lots = new_value
-                    logger.info("___________________set_current_lots_________________________")
-                    logger.info(manager._current_lots)
-                    # Confirm update to sender
+                    params = message["value"]  
+                    new_percent = manager.mt5.set_lots_params(params)
+                    manager._current_lots = new_percent
+
                     await websocket.send_json({
                         "event": "current_lots_updated",
-                        "value": new_value,
+                        "value": new_percent,         
                         "updated_by": client_id
                     })
                 elif message.get("action") == "take_current_balance":

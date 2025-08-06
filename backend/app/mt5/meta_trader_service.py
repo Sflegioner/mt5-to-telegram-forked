@@ -7,6 +7,9 @@ logger = logging.getLogger("MetaTraderService")
 
 class MetaTraderService:
     _instance = None
+    method = "methode1"
+    percent = 2
+    reinvest = True
 
     def __new__(cls):
         if cls._instance is None:
@@ -34,111 +37,148 @@ class MetaTraderService:
     def parse_message(self, message_text: str, LOTs_from_signals: float) -> dict:
         """
         Expected formats:
-         BUY:
-        „  LIVE TREND
+        ────────────────────────────────────────────────────────────────
+        BUY:
+        LIVE TREND
         ICH KAUFE AMAZON CALL 225 (EK: 10.40)
-        Ich wähle den maximalen Multiplikator ℹℹ“
-        „  LIVE TREND
+        Ich wähle den maximalen Multiplikator
+
+        LIVE TREND
         ICH KAUFE TESLA PUT 380 (EK: 31.50)
-        Ich wähle den maximalen Multiplikator “
-        „  LIVE TREND
+
+        LIVE TREND
         ICH KAUFE GOLD (EK: 2607.48)
-        Ich wähle den maximalen Multiplikator“
-        SET:
-        „I
-        ch setze den 
-        SL bei TESLA PUT 380 auf 28.35“
-        Or just:
-        „TESLA PUT 380 
-        SL: 181.1453“
-        CLOSE:
-        „ICH SCHLIEßE AMAZON CALL 225 721€ GEWINN “
-        „ICH SCHLIEßE GOLD 2.070€ GEWINN “
+
         SELL:
-        „  LIVE TREND
+        LIVE TREND
         ICH VERKAUFE TESLA PUT 380 (EK: 34.75)
-        Ich wähle den maximalen Multiplikator“
+
+        SET (дві версії):
+        ich setze den SL bei TESLA PUT 380 auf 28.35
+        TESLA PUT 380 
+        SL: 181.1453
+
+        CLOSE:
+        ICH SCHLIEßE AMAZON CALL 225 721€ GEWINN
+        ICH SCHLIEßE GOLD 2.070€ GEWINN
         """
         result = {
-            "is_signal":False,
-            "type": None,
-            "symbol": None,
-            "option": None,
-            "strike": None,
-            "price": None,
-            "LOTs": 0.01
+            "is_signal": False,
+            "type":      None,
+            "symbol":    None,
+            "option":    None,
+            "strike":    None,
+            "price":     None,
+            "sl":        None,
+            "tp":        None,
+            "LOTs":      LOTs_from_signals or 0.01
         }
-        logger.info(message_text)
-        match_buy=re.search(r'\bKAUFE\b\s+(?P<symbol>\w+)(?:\s+(?P<option>CALL|PUT)\s+(?P<strike>\d+))?.*EK:\s*(?P<price>[\d\.]+)', message_text, re.IGNORECASE)
-        match_sell=re.search(r'\bVERKAUFE\b\s+(?P<symbol>\w+)'r'(?:\s+(?P<option>CALL|PUT)\s+(?P<strike>\d+))?'r'.*EK[:：]?\s*(?P<price>[\d\.]+)',message_text,re.IGNORECASE)
-        match_set = re.search(r'''
-            (?P<de>
+        logger.info(f"Parsing Signal: {message_text!r}")
+
+        # ── BUY ───────────────────────────────────────────────────────────
+        match_buy = re.search(
+            r'''
+            (?:LIVE\s+TREND\s*)?         # необов’язково "LIVE TREND"
+            ICH\s+KAUFE\s+               # "ICH KAUFE"
+            (?P<symbol>[A-ZÄÖÜ0-9]+)     # SYMBOL
+            (?:\s+(?P<option>CALL|PUT)\s+(?P<strike>\d+))?  # необов’язково CALL/PUT + strike
+            \s*\(EK[:：]\s*(?P<price>[\d\.]+)\)  # (EK: price)
+            ''',
+            message_text,
+            re.IGNORECASE | re.VERBOSE
+        )
+
+        # ── SELL ──────────────────────────────────────────────────────────
+        match_sell = re.search(
+            r'''
+            (?:LIVE\s+TREND\s*)?         # необов’язково "LIVE TREND"
+            ICH\s+VERKAUFE\s+            # "ICH VERKAUFE"
+            (?P<symbol>[A-ZÄÖÜ0-9]+)
+            (?:\s+(?P<option>CALL|PUT)\s+(?P<strike>\d+))?
+            .*?                          # будь-які символи
+            \(?EK[:：]?\s*(?P<price>[\d\.]+)\)?  # EK: price або (EK: price)
+            ''',
+            message_text,
+            re.IGNORECASE | re.VERBOSE | re.DOTALL
+        )
+
+        # ── SET ───────────────────────────────────────────────────────────
+        match_set = re.search(
+            r'''
+            (?P<de>                       # варіант з німецьким текстом
                 ich\s+setze\s+den\s+(?P<mode_de>SL|TP)\s+bei\s+
                 (?P<symbol_de>[A-Z0-9]{3,})
                 (?:\s+(?P<option_de>CALL|PUT)\s+(?P<strike_de>\d+))?
                 \s+auf\s+(?P<price_de>[\d\.,]+)
             )
             |
-            (?P<gen>
+            (?P<gen>                      # generic з явно SL: або TP:
+                (?=.*\b(?:SL|TP)\b)       # lookahead: має бути SL або TP
                 (?P<symbol>[A-Z0-9]{3,})
                 (?:\s+(?P<option>CALL|PUT)\s+(?P<strike>\d+))?
-                (?:
-                    .*?
-                    SL[:：]?\s*(?P<sl>[\d\.,]+)
-                )?
-                (?:
-                    .*?
-                    TP[:：]?\s*(?P<tp>[\d\.,]+)
-                )?
+                .*?
+                (?:SL[:：]\s*(?P<sl>[\d\.,]+))?  
+                .*?
+                (?:TP[:：]\s*(?P<tp>[\d\.,]+))?
             )
-        ''',
+            ''',
             message_text,
             re.IGNORECASE | re.VERBOSE | re.DOTALL
         )
+
+        # ── CLOSE ─────────────────────────────────────────────────────────
         match_close = re.search(
-            r'SCHLIE\w*\s+'                          # ICH SCHLIEßE
-            r'(?P<symbol>\w+)'                       #
-            r'(?:\s+(?P<option>CALL|PUT))?'          # 
-            r'(?:\s+(?P<strike>\d+))?'               # 
-            r'\s+(?P<price>[\d\.,]+)\s*€',           # 
+            r'''
+            ICH\s+SCHLIE\w*\s+
+            (?P<symbol>[A-ZÄÖÜ0-9]+)
+            (?:\s+(?P<option>CALL|PUT))?
+            (?:\s+(?P<strike>\d+))?
+            \s+(?P<price>[\d\.,]+)\s*€
+            ''',
             message_text,
-            re.IGNORECASE | re.DOTALL
+            re.IGNORECASE | re.VERBOSE
         )
 
+        # ──────────────────────────────────────────────────────────────────
         if match_buy:
+            # Обробляємо BUY
             result.update({
                 "is_signal": True,
-                "type": "BUY",
-                "symbol": match_buy.group("symbol"),
-                "option": (match_buy.group("option") or "").upper(),
-                "strike": match_buy.group("strike"),
-                "price": float(match_buy.group("price"))
+                "type":      "BUY",
+                "symbol":    match_buy.group("symbol").upper(),
+                "option":    (match_buy.group("option") or "").upper(),
+                "strike":    match_buy.group("strike"),
+                "price":     float(match_buy.group("price"))
             })
+
         elif match_sell:
+            # Обробляємо SELL
             result.update({
                 "is_signal": True,
-                "type": "SELL",
-                "symbol": match_sell.group("symbol"),
-                "option": (match_sell.group("option") or ""),
-                "strike": match_sell.group("strike"),
-                "price": float(match_sell.group("price"))
+                "type":      "SELL",
+                "symbol":    match_sell.group("symbol").upper(),
+                "option":    (match_sell.group("option") or "").upper(),
+                "strike":    match_sell.group("strike"),
+                "price":     float(match_sell.group("price"))
             })
-        if match_set:
+
+        elif match_set:
+            # Обробляємо SET
             if match_set.group('de'):
+                # Варіант: "ich setze den SL/TP bei ..."
                 symbol = match_set.group('symbol_de').upper()
                 option = (match_set.group('option_de') or "").upper()
                 strike = match_set.group('strike_de')
-
                 price_val = float(match_set.group('price_de').replace(',', '.'))
                 if match_set.group('mode_de').upper() == 'SL':
                     sl, tp = price_val, None
                 else:
                     sl, tp = None, price_val
             else:
+                # Generic SL:.. / TP:..
                 symbol = match_set.group('symbol').upper()
                 option = (match_set.group('option') or "").upper()
                 strike = match_set.group('strike')
-
                 sl_str = match_set.group('sl')
                 tp_str = match_set.group('tp')
                 sl = float(sl_str.replace(',', '.')) if sl_str else None
@@ -153,33 +193,36 @@ class MetaTraderService:
                 "sl":        sl,
                 "tp":        tp,
             })
+
         elif match_close:
+            # Обробляємо CLOSE
             raw_price = match_close.group("price").replace('.', '').replace(',', '.')
             result.update({
                 "is_signal": True,
-                "type": "CLOSE",
-                "symbol": match_close.group("symbol"),
-                "option": (match_close.group("option") or "").upper(),
-                "strike": match_close.group("strike"),
-                "price": float(raw_price)
+                "type":      "CLOSE",
+                "symbol":    match_close.group("symbol").upper(),
+                "option":    (match_close.group("option") or "").upper(),
+                "strike":    match_close.group("strike"),
+                "price":     float(raw_price)
             })
 
+        # Формуємо текст парсингу для логів / відповіді
         if result["is_signal"]:
-            lines = [
+            result["parsed_message"] = "\n".join([
                 "┌─ 💵 Signal Parsed 💵",
                 f"│ Type:   {result['type']}",
                 f"│ Symbol: {result['symbol']}",
                 f"│ Option: {result['option'] or '-'}",
                 f"│ Strike: {result['strike'] or '-'}",
-                f"│ Price:  {result['price']}",
-                f"│ SL:     {result['sl'] or "-"}",
-                f"│ TP:     {result['tp'] or "-"}",
+                f"│ Price:  {result['price'] or '-'}",
+                f"│ SL:     {result['sl'] or '-'}",
+                f"│ TP:     {result['tp'] or '-'}",
                 f"│ LOTs:   {result['LOTs']}",
                 "└─────────────────────"
-            ]
-            result["parsed_message"] = "\n".join(lines)
+            ])
         else:
-            result["parsed_message"] = None 
+            result["parsed_message"] = None
+
         return result
 
     def execute_BUY_operation(self, parsed: dict) -> dict:
@@ -221,14 +264,11 @@ class MetaTraderService:
             logger.error(errmsg)
             final_msg["mt5_message"] = errmsg
             return final_msg
-
-        vol = max(info.volume_min, min(info.volume_max, parsed["LOTs"]))
-        vol = round(vol / info.volume_step) * info.volume_step
-
+        parsed["LOTs"] = self.calculate_LOTs(self.percent, symbol, tick.ask)
         request = {
             "action":       mt5.TRADE_ACTION_DEAL,
             "symbol":       symbol,
-            "volume":       vol,
+            "volume":       parsed["LOTs"],
             "type":         mt5.ORDER_TYPE_BUY,
             "price":        tick.ask,
             "deviation":    10,
@@ -247,7 +287,7 @@ class MetaTraderService:
             return final_msg
 
         #SUCSESS
-        success_msg = f"BUY executed: {vol} lots of {symbol} @ {tick.ask}"
+        success_msg = f"BUY executed: {parsed["LOTs"]} lots of {symbol} @ {tick.ask}"
         logger.info(success_msg)
         return {
             "type":        "BUY_mt5",
@@ -467,15 +507,48 @@ class MetaTraderService:
             return None
         return account_info.balance
     
-    def calculate_LOTs(balance_options):
-        percent = balance_options.percent
-        reinvest = balance_options.reinvest
-        
+    def set_lots_params(self, params: dict) -> float:
 
-        if balance_options.methode == "methode 1":
-            pass
-        if balance_options.methode == "methode 2":
-            pass
+        if "method" in params:
+            self.method = params["method"]
+        if "percentage" in params:
+            new_pct = float(params["percentage"])
+            self.percent = max(0.0, min(new_pct, 20.0))
+        if "reinvest" in params:
+            self.reinvest = bool(params["reinvest"])
+
+        logger.info(
+            f"Lots params updated: "
+            f"method={self.method}, percent={self.percent}, reinvest={self.reinvest}"
+        )
+        return self.percent
+    
+    def calculate_LOTs(self, percentage: float, symbol: str, entry_price: float) -> float:
+        balance = self.take_current_balance()
+        if balance is None:
+            logger.error("Failed to get balance for LOT calculation")
+            return 0.0
+
+        percentage = min(percentage, 20.0) / 100.0
+        risk_amount = balance * percentage
+        info = mt5.symbol_info(symbol)
+        if info is None:
+            logger.error(f"Symbol info not found for {symbol}")
+            return 0.0
+
+        contract_size = info.trade_contract_size  # usually 1 for CFDs, 100000 for Forex
+
+        if contract_size <= 0 or entry_price <= 0:
+            logger.error(f"Invalid contract size or entry price for {symbol}")
+            return 0.0
+        lot = risk_amount / (contract_size * entry_price)
+
+        lot = max(info.volume_min, min(info.volume_max, lot))
+        lot = round(lot / info.volume_step) * info.volume_step
+
+        logger.info(f"Calculated LOT: {lot} for {symbol} at price {entry_price} using {percentage*100}% of balance")
+        return lot
+
         
 
     
