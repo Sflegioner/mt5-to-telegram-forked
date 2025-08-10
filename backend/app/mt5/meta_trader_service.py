@@ -2,6 +2,7 @@ from datetime import datetime
 import re
 import logging
 import MetaTrader5 as mt5
+import sys
 
 logger = logging.getLogger("MetaTraderService")
 
@@ -20,6 +21,7 @@ class MetaTraderService:
                 raise Exception(f"MT5 ###ERROR###: {error}")
             else:
                 logger.info("MT5 initialized successfully")
+                logger.info(f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")
         return cls._instance
 
     def test_connection(self) -> bool:
@@ -62,6 +64,7 @@ class MetaTraderService:
         ICH SCHLIEßE AMAZON CALL 225 721€ GEWINN
         ICH SCHLIEßE GOLD 2.070€ GEWINN
         """
+        
         result = {
             "is_signal": False,
             "type":      None,
