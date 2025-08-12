@@ -3,10 +3,11 @@ Telegram Discussions Retrieval Service
 
 Provides functionality to connect to Telegram and retrieve discussions, messages, etc.
 """
-
+import logging
 import os
 import sys
 import asyncio
+import sqlite3
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Callable, Union
 
@@ -15,16 +16,18 @@ from telethon.errors import SessionPasswordNeededError
 from telethon.tl.types import Channel, Chat, User, Message
 from telethon.tl.functions.messages import GetDialogsRequest
 from telethon.tl.types import InputPeerEmpty
-
+logger = logging.getLogger("MetaTraderService")
 class TelegramService:
     def __init__(
-        self, 
-        api_id: int, 
-        api_hash: str, 
-        phone: Optional[str] = None,
-        session_name: str = "telegram_session",
-        code_callback: Optional[Callable[[], str]] = None,
-        password_callback: Optional[Callable[[], str]] = None
+    self, 
+    api_id: int, 
+    api_hash: str, 
+    phone: Optional[str] = None,
+    session_name: Optional[str] = None,
+    code_callback: Optional[Callable[[], str]] = None,
+    password_callback: Optional[Callable[[], str]] = None,
+    lock: asyncio.Lock = None
+    
     ):
         """
         Initialize the Telegram service with API credentials.
@@ -40,29 +43,51 @@ class TelegramService:
         self.api_id = api_id
         self.api_hash = api_hash
         self.phone = phone
-        self.session_name = session_name
+        self.session_name = session_name or f"telegram_session_{api_id}"
         self.code_callback = code_callback
         self.password_callback = password_callback
-        self.client = TelegramClient(session_name, api_id, api_hash)
-        self.phone_code_hash = None  # Store phone code hash for sign-in
+        self.client = TelegramClient(self.session_name, api_id, api_hash)
+        self.phone_code_hash = None
+        self._lock = lock if lock else asyncio.Lock()
+        self.name_to_dialog: Dict[str, Dict[str, Any]] = {}  # Cache: name -> {"id": int, "name": str}
+        logger.info(f"Lock type in __init__: {type(self._lock)}")
+        
     
     async def connect(self) -> None:
         """Connect to Telegram and handle authentication if needed."""
         # Ensure client is connected
-        if not self.client.is_connected():
-            await self.client.connect()
-        
-        if not await self.client.is_user_authorized():
-            if not self.phone:
-                raise ValueError("Phone number is required for first-time authentication")
-            
-            # Send code and store the phone_code_hash
-            result = await self.client.send_code_request(self.phone)
-            self.phone_code_hash = result.phone_code_hash
-            
-            # For the API to handle, we'll raise an exception to indicate verification is needed
-            raise ValueError("Verification code required. Please check your phone.")
-    
+        max_retries  = 5
+        for attempt in range(1, max_retries + 1):
+            try:
+                if not self.client.is_connected():
+                    await self.client.connect()
+                if not await self.client.is_user_authorized():
+                    if not self.phone:
+                        raise ValueError("Phone number is required for first-time authentication")
+                    # Send code and store the phone_code_hash
+                    result = await self.client.send_code_request(self.phone)
+                    self.phone_code_hash = result.phone_code_hash
+                    # For the API to handle, we'll raise an exception to indicate verification is needed
+                    raise ValueError("Verification code required. Please check your phone.")
+                return
+            except sqlite3.OperationalError as sqe:
+                msg = str(sqe).lower()
+                if "database is locked" in msg and attempt < max_retries:
+                    logger.info(" ↻ RECONNECTING ↻")
+                    await asyncio.sleep(0.2 * attempt)
+                    continue
+                raise
+
+            except Exception:
+                try:
+                    if getattr(self.client, "is_connected", lambda: False)():
+                        await self.client.disconnect()
+                except sqlite3.OperationalError:
+                    pass
+                except Exception:
+                    pass
+                raise
+
     async def connect_with_credentials(self, api_id: int, api_hash: str, phone: Optional[str] = None) -> bool:
         """
         Connect to Telegram using provided credentials.
@@ -160,6 +185,7 @@ class TelegramService:
         Returns:
             List of dialog information dictionaries
         """
+        # No need for inner lock here: callers (e.g., subscribe_to_dialog_by_name) already acquire it.
         result = []
         async for dialog in self.client.iter_dialogs():
             dialog_info = {
@@ -170,7 +196,6 @@ class TelegramService:
                 "entity_id": dialog.entity.id
             }
             result.append(dialog_info)
-        
         return result
     
     async def get_dialog_by_name(self, dialog_name: str) -> Optional[Dict[str, Any]]:

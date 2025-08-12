@@ -198,7 +198,6 @@ class MetaTraderService:
             })
 
         elif match_close:
-            # Обробляємо CLOSE
             raw_price = match_close.group("price").replace('.', '').replace(',', '.')
             result.update({
                 "is_signal": True,
@@ -208,8 +207,6 @@ class MetaTraderService:
                 "strike":    match_close.group("strike"),
                 "price":     float(raw_price)
             })
-
-        # Формуємо текст парсингу для логів / відповіді
         if result["is_signal"]:
             result["parsed_message"] = "\n".join([
                 "┌─ 💵 Signal Parsed 💵",

@@ -23,9 +23,6 @@ logger = logging.getLogger(__name__)
 
 # Create router
 router = APIRouter(prefix="/ws", tags=["websocket"])
-
-
-
 # Create global connection manager
 manager = ConnectionManager()
 
@@ -37,102 +34,35 @@ async def websocket_messages(
     api_hash: Optional[str] = Query(None),
     phone: Optional[str] = Query(None)
 ):
-    """
-    WebSocket endpoint for real-time message updates.
-    
-    Connect to this endpoint to receive real-time updates for Telegram messages.
-    Authentication is handled through URL parameters:
-    
-    ```
-    /v1/ws/messages?client_id=1234&api_id=12345&api_hash=abcdef&phone=+123456789
-    ```
-    
-    After connecting, you can subscribe to dialogs:
-    
-    ```json
-    {
-        "action": "subscribe",
-        "dialog_id": 123456789
-    }
-    ```
-    
-    To subscribe using dialog name instead of ID:
-    ```json
-    {
-        "action": "subscribe_by_name",
-        "dialog_name": "Dialog Name"
-    }
-    ```
-    
-    To unsubscribe:
-    ```json
-    {
-        "action": "unsubscribe",
-        "dialog_id": 123456789
-    }
-    ```
-    
-    If verification is needed:
-    ```json
-    {
-        "action": "verify",
-        "code": "12345",
-        "password": "optional_2fa_password"
-    }
-    ```
-    
-    You will receive messages in this format:
-    ```json
-    {
-        "event": "new_message",
-        "dialog_id": 123456789,
-        "message": {
-            "id": 123,
-            "text": "Message content",
-            "date": "2023-07-01T12:34:56+00:00",
-            "sender": {
-                "id": 987654321,
-                "first_name": "John",
-                "last_name": "Doe",
-                "username": "johndoe"
-            },
-            "has_media": false
-        }
-    }
-    ```
-    """
     # Generate client ID if not provided
     if not client_id:
         client_id = str(uuid4())
-    
     try:
-        # Accept connection and register it (accepts the connection inside the connect method)
+       
         await manager.connect(websocket, client_id)
-        
-        # Send connection info
         await websocket.send_json({
             "event": "connected",
             "client_id": client_id
         })
-        
-        # Check if credentials were provided as URL parameters
         if api_id and api_hash:
-            # Create credentials object
             credentials = TelegramCredentials(
                 api_id=api_id,
                 api_hash=api_hash,
                 phone=phone
             )
-            
             # Try to authenticate
+            logger.info("💣Try to authenticate💣")
             result = await manager.initialize_listener_service(client_id, credentials)
-            
+
+            logger.info(result)
             # Send authentication result
             if result["success"]:
                 await websocket.send_json({
                     "event": "authenticated",
                     "success": True
                 })
+                logger.info("💣authenticated💣")
+                
             elif result.get("needs_verification", False):
                 await websocket.send_json({
                     "event": "verification_needed",
@@ -221,20 +151,31 @@ async def websocket_messages(
                         credentials = manager.client_credentials[client_id]
                         code = message["code"]
                         password = message.get("password")
-                        
-                        try:
+
+                        session_key, listener = manager.get_listener_for_client(client_id)
+                        if not listener:
+                            await websocket.send_json({
+                                "event": "authentication_failed",
+                                "success": False,
+                                "message": "No listener found for this client. Please re-authenticate."
+                            })
+                            continue
+
+                        async def do_signin():
                             if password:
-                                await manager.listener_service.telegram_service.sign_in_with_password(code, password)
+                                return await listener.telegram_service.sign_in_with_password(code, password)
                             else:
-                                await manager.listener_service.telegram_service.sign_in_with_code(code)
-                            
+                                return await listener.telegram_service.sign_in_with_code(code)
+
+                        try:
+                            await manager.run_under_session_lock(session_key, do_signin)
                             await websocket.send_json({
                                 "event": "authenticated",
                                 "success": True
                             })
                         except Exception as e:
-                            error_message = str(e)
-                            if "2fa" in error_message.lower() or "two-step verification" in error_message.lower():
+                            err = str(e)
+                            if "2fa" in err.lower() or "two-step verification" in err.lower():
                                 await websocket.send_json({
                                     "event": "verification_needed",
                                     "success": False,
@@ -245,7 +186,7 @@ async def websocket_messages(
                                 await websocket.send_json({
                                     "event": "authentication_failed",
                                     "success": False,
-                                    "message": f"Verification failed: {error_message}"
+                                    "message": f"Verification failed: {err}"
                                 })
                     else:
                         await websocket.send_json({
@@ -253,7 +194,6 @@ async def websocket_messages(
                             "success": False,
                             "message": "No pending verification or missing code"
                         })
-                
                 # Handle subscribe/unsubscribe actions
                 elif "action" in message and "dialog_id" in message:
                     dialog_id = int(message["dialog_id"])
@@ -298,11 +238,12 @@ async def websocket_messages(
                 # Handle subscribe by dialog name
                 elif "action" in message and message["action"] == "subscribe_by_name" and "dialog_name" in message:
                     dialog_name = message["dialog_name"]
+                    logger.info("suscribtion handled")
                     
                     # Try to subscribe to the dialog by name
                     if manager.listener_service and manager.listener_service.telegram_service:
                         result = await manager.subscribe_to_dialog_by_name(client_id, dialog_name)
-                        
+                        logger.info(result)
                         if result["success"]:
                             dialog = result["dialog"]
                             await websocket.send_json({
@@ -339,8 +280,7 @@ async def websocket_messages(
                         "message": "Invalid message format or action"
                     })
                 
-                
-                    
+
             except json.JSONDecodeError:
                 await websocket.send_json({
                     "event": "error",

@@ -121,7 +121,10 @@ async def main():
         if 'listener_service' in locals():
             await listener_service.stop_all_listeners()
         if 'telegram_service' in locals():
-            await telegram_service.disconnect()
+            try:
+                await telegram_service.disconnect()
+            except Exception as e:
+                logger.exception("Ignored disconnect error: %s", e)
 
 if __name__ == "__main__":
     asyncio.run(main()) 

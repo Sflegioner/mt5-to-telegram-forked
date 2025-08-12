@@ -1,7 +1,7 @@
 """
 API endpoints for Telegram operations.
 """
-
+from telethon.errors import AuthKeyUnregisteredError, UnauthorizedError
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from pydantic import BaseModel, Field
@@ -36,35 +36,55 @@ class ConnectResponse(BaseModel):
 # --- Helper Functions ---
 async def get_telegram_service(credentials: TelegramCredentials) -> TelegramService:
     """Create a new TelegramService instance or retrieve an existing one."""
-    # Use a combination of api_id and api_hash as a session identifier
     session_id = f"{credentials.api_id}_{credentials.api_hash}"
     
+    recreate = False
     if session_id in active_sessions:
-        return active_sessions[session_id]
+        service = active_sessions[session_id]
+        # Validate existing session with a test API call
+        try:
+            await service.client.get_me()  # Lightweight check to ensure auth key is valid
+        except (AuthKeyUnregisteredError, UnauthorizedError) as e:
+            # Session invalid; clean up and recreate
+            await cleanup_session(session_id)
+            recreate = True
+    else:
+        recreate = True
     
-    # Create a new service
-    service = TelegramService(
-        api_id=credentials.api_id,
-        api_hash=credentials.api_hash,
-        phone=credentials.phone,
-    )
+    if recreate:
+        # Create a new service
+        service = TelegramService(
+            api_id=credentials.api_id,
+            api_hash=credentials.api_hash,
+            phone=credentials.phone,
+        )
     
     try:
         # Connect to Telegram
         await service.connect()
-        active_sessions[session_id] = service
-        return service
-    except Exception as e:
-        await service.disconnect()
-        # Check if the error indicates verification code is needed
-        error_message = str(e)
-        if "verification code" in error_message.lower():
-            # Store the session for later verification
+        
+        # Check if the user is authorized
+        if not await service.client.is_user_authorized():
+            # Send code request and move to pending
+            await service.client.send_code_request(credentials.phone)
             pending_verifications[session_id] = service
             raise HTTPException(
                 status_code=401,
                 detail="Verification code required. Please submit the code sent to your phone."
             )
+        
+        # Validate again after connect
+        await service.client.get_me()
+        
+        active_sessions[session_id] = service
+        return service
+    except HTTPException:
+        raise  # Re-raise the 401 for verification
+    except (AuthKeyUnregisteredError, UnauthorizedError) as e:
+        await service.disconnect()
+        raise HTTPException(status_code=401, detail=f"Session invalid or revoked. Please re-authenticate: {str(e)}")
+    except Exception as e:
+        await service.disconnect()
         raise HTTPException(status_code=401, detail=f"Authentication failed: {str(e)}")
 
 async def cleanup_session(session_id: str) -> None:
@@ -107,6 +127,7 @@ async def connect_to_telegram(
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
 @router.post("/verify_code", response_model=VerificationResponse)
 async def verify_code(
     verification_request: VerificationRequest,
@@ -125,12 +146,12 @@ async def verify_code(
         
         # Try to sign in with the code
         try:
+            # First, sign in with code
+            await service.client.sign_in(credentials.phone, verification_request.code)
+            
+            # If 2FA password is provided (in case of retry), sign in with password
             if verification_request.password:
-                # Sign in with 2FA
-                await service.sign_in_with_password(verification_request.code, verification_request.password)
-            else:
-                # Sign in with code only
-                await service.sign_in_with_code(verification_request.code)
+                await service.client.sign_in(password=verification_request.password)
                 
             # Move the service from pending to active
             active_sessions[session_id] = service
@@ -142,8 +163,12 @@ async def verify_code(
             
             return VerificationResponse(success=True)
         except Exception as e:
-            error_message = str(e)
-            if "2fa" in error_message.lower() or "two-step verification" in error_message.lower():
+            error_message = str(e).lower()
+            if "two-step" in error_message or "2fa" in error_message or "password" in error_message:
+                # If password was provided but failed, raise error
+                if verification_request.password:
+                    raise HTTPException(status_code=400, detail=f"Invalid password: {str(e)}")
+                # Otherwise, request password
                 return VerificationResponse(success=False, needs_password=True)
             raise
     except HTTPException:
@@ -165,6 +190,11 @@ async def get_dialogs(credentials: TelegramCredentials):
     try:
         dialogs = await service.get_all_dialogs()
         return dialogs
+    except (AuthKeyUnregisteredError, UnauthorizedError) as e:
+        # Invalidate session on error
+        session_id = f"{credentials.api_id}_{credentials.api_hash}"
+        await cleanup_session(session_id)
+        raise HTTPException(status_code=401, detail=f"Authorization error during dialog fetch. Please re-authenticate: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
